@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Plus, Trash2, Download, Printer, ArrowLeft, ArrowRight, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { useState, useMemo, useEffect } from "react";
+import { Plus, Trash2, Download, Printer, ArrowLeft, ArrowRight, CheckCircle2, Loader2, RefreshCw, History, Save } from "lucide-react";
+import { supabase } from "../lib/supabaseClient";
 
 const KIND_LABELS = {
   mcq: "वस्तुनिष्ठ प्रश्न",
@@ -13,6 +14,28 @@ const KIND_LABELS = {
 };
 
 const STEPS = ["सेटअप", "अध्याय चुनें", "AI जनरेट + संपादन", "अंतिम समीक्षा"];
+
+const NCERT_MATHS_CHAPTERS = {
+  6: {
+    en: ["Patterns in Mathematics", "Lines and Angles", "Number Play", "Data Handling and Presentation", "Prime Time", "Perimeter and Area", "Fractions", "Playing with Constructions", "Symmetry", "The Other Side of Zero"],
+    hi: ["गणित में पैटर्न", "रेखाएँ और कोण", "संख्याओं का खेल", "आँकड़ों का प्रबंधन और प्रस्तुतिकरण", "अभाज्य समय", "परिमाप और क्षेत्रफल", "भिन्न", "रचनाओं के साथ खेलना", "सममिति", "शून्य के दूसरी ओर"],
+  },
+  7: {
+    en: ["Large Numbers Around Us", "Arithmetic Expressions", "A Peek Beyond the Point", "Expressions using Letter-Numbers", "Parallel and Intersecting Lines", "Number Play", "A Tale of Three Intersecting Lines", "Working with Fractions", "Geometric Twins", "Operations with Integers", "Finding Common Ground", "Another Peek Beyond the Point", "Connecting the Dots...", "Constructions and Tilings", "Finding the Unknown"],
+  },
+  8: {
+    en: ["Rational Numbers", "Linear Equations in One Variable", "Understanding Quadrilaterals", "Data Handling", "Squares and Square Roots", "Cubes and Cube Roots", "Comparing Quantities", "Algebraic Expressions and Identities", "Mensuration", "Exponents and Powers", "Direct and Inverse Proportions", "Factorisation", "Introduction to Graphs"],
+    hi: ["परिमेय संख्याएँ", "एक चर वाले रैखिक समीकरण", "चतुर्भुजों को समझना", "आँकड़ों का प्रबंधन", "वर्ग और वर्गमूल", "घन और घनमूल", "राशियों की तुलना", "बीजीय व्यंजक एवं सर्वसमिकाएँ", "क्षेत्रमिति", "घातांक और घात", "सीधा और प्रतिलोम समानुपात", "गुणनखंडन", "आलेखों से परिचय"],
+  },
+  9: {
+    en: ["Number Systems", "Polynomials", "Coordinate Geometry", "Linear Equations in Two Variables", "Introduction to Euclid's Geometry", "Lines and Angles", "Triangles", "Quadrilaterals", "Circles", "Heron's Formula", "Surface Areas and Volumes", "Statistics"],
+    hi: ["संख्या पद्धति", "बहुपद", "निर्देशांक ज्यामिति", "दो चरों वाले रैखिक समीकरण", "यूक्लिड की ज्यामिति का परिचय", "रेखाएँ और कोण", "त्रिभुज", "चतुर्भुज", "वृत्त", "हीरोन का सूत्र", "पृष्ठीय क्षेत्रफल और आयतन", "सांख्यिकी"],
+  },
+  10: {
+    en: ["Real Numbers", "Polynomials", "Pair of Linear Equations in Two Variables", "Quadratic Equations", "Arithmetic Progressions", "Triangles", "Coordinate Geometry", "Introduction to Trigonometry", "Some Applications of Trigonometry", "Circles", "Areas Related to Circles", "Surface Areas and Volumes", "Statistics", "Probability"],
+    hi: ["वास्तविक संख्याएँ", "बहुपद", "दो चरों वाले रैखिक समीकरण युग्म", "द्विघात समीकरण", "समांतर श्रेढ़ियाँ", "त्रिभुज", "निर्देशांक ज्यामिति", "त्रिकोणमिति का परिचय", "त्रिकोणमिति के कुछ अनुप्रयोग", "वृत्त", "वृत्तों से संबंधित क्षेत्रफल", "पृष्ठीय क्षेत्रफल और आयतन", "सांख्यिकी", "प्रायिकता"],
+  },
+};
 
 const HALFYEARLY_SECTIONS = [
   { id: "s1", kind: "mcq", count: 10, marks: 1 },
@@ -52,6 +75,12 @@ function romanToDevanagari(n) {
 
 export default function ExamPaperGenerator() {
   const [step, setStep] = useState(0);
+  const [view, setView] = useState("app");
+  const [historyList, setHistoryList] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [selectedHistory, setSelectedHistory] = useState(null);
+  const [saveStatus, setSaveStatus] = useState("");
   const [header, setHeader] = useState({
     school: "",
     exam: "अर्धवार्षिक परीक्षा",
@@ -60,11 +89,14 @@ export default function ExamPaperGenerator() {
     time: "3 घंटे",
     date: "",
     difficulty: "मिश्रित (Mixed)",
+    medium: "English",
+    board: "CBSE (NCERT)",
   });
   const [sections, setSections] = useState(DEFAULT_SECTIONS);
   const [chapters, setChapters] = useState([]);
   const [chapterInput, setChapterInput] = useState("");
   const [chapterMode, setChapterMode] = useState("simple");
+  const [chapterLoadMsg, setChapterLoadMsg] = useState("");
   const [questions, setQuestions] = useState(() => Object.fromEntries(DEFAULT_SECTIONS.map((s) => [s.id, []])));
   const [activeSectionIdx, setActiveSectionIdx] = useState(0);
   const [generating, setGenerating] = useState(false);
@@ -91,6 +123,26 @@ export default function ExamPaperGenerator() {
       delete next[id];
       return next;
     });
+  }
+
+  function autoLoadChapters() {
+    const classNum = parseInt((header.className || "").replace(/\D/g, ""), 10);
+    const isMaths = /math|गणित/i.test(header.subject || "");
+    const data = NCERT_MATHS_CHAPTERS[classNum];
+    if (!classNum || !isMaths || !data) {
+      setChapterLoadMsg("अभी सिर्फ Class 6-10 Maths ke liye available hai — class/subject check karo");
+      return;
+    }
+    const list = header.medium === "Hindi" && data.hi ? data.hi : data.en;
+    if (header.medium === "Hindi" && !data.hi) {
+      setChapterLoadMsg("Class " + classNum + " ke liye Hindi names abhi available nahi (naye NCERT chapters) — English names load kar diye");
+    } else {
+      setChapterLoadMsg("");
+    }
+    setChapters((prev) => [
+      ...prev,
+      ...list.map((name) => ({ id: "c" + Date.now() + Math.random(), name, checked: true, marks: 0 })),
+    ]);
   }
 
   function addChapter() {
@@ -139,6 +191,7 @@ export default function ExamPaperGenerator() {
       body: JSON.stringify({
         className: header.className,
         difficulty: header.difficulty,
+        board: header.board,
         subject: header.subject,
         chapters: checkedChapters,
         chapterMarks: chapterMode === "advanced" ? chapters.filter((c) => c.checked).map((c) => ({ name: c.name, marks: Number(c.marks) || 0 })) : null,
@@ -192,6 +245,44 @@ export default function ExamPaperGenerator() {
     });
   }
 
+  async function loadHistory() {
+    if (!supabase) {
+      setHistoryError("Supabase set up nahi hai (Environment Variables check karo)");
+      return;
+    }
+    setHistoryLoading(true);
+    setHistoryError("");
+    const { data, error } = await supabase
+      .from("papers")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) setHistoryError(error.message);
+    else setHistoryList(data || []);
+    setHistoryLoading(false);
+  }
+
+  async function savePaperToHistory() {
+    if (!supabase) {
+      setSaveStatus("Supabase set up nahi hai");
+      return;
+    }
+    setSaveStatus("saving");
+    const { error } = await supabase.from("papers").insert({
+      school: header.school,
+      exam: header.exam,
+      class_name: header.className,
+      subject: header.subject,
+      board: header.board,
+      medium: header.medium,
+      difficulty: header.difficulty,
+      header,
+      sections,
+      questions,
+    });
+    setSaveStatus(error ? "error" : "saved");
+  }
+
   const printRefCb = (node) => { window.__printRef = node; };
   function handlePrint() {
     const content = window.__printRef?.innerHTML || "";
@@ -234,12 +325,31 @@ export default function ExamPaperGenerator() {
           <div className="w-11 h-11 rounded-full bg-red-700 text-white flex items-center justify-center font-serif text-lg shadow-sm">
             {romanToDevanagari(totalMarks)}
           </div>
-          <div>
+          <div className="flex-1">
             <h1 className="font-serif text-xl font-bold text-slate-900">प्रश्न पत्र निर्माता</h1>
             <p className="text-xs text-slate-500">कुल अंक {totalMarks} · कुल प्रश्न {totalQuestions}</p>
           </div>
+          <button
+            onClick={() => { setView(view === "history" ? "app" : "history"); if (view !== "history") loadHistory(); setSelectedHistory(null); }}
+            className="flex items-center gap-1 text-xs border border-stone-300 rounded-full px-3 py-1.5 text-slate-600"
+          >
+            <History size={14} /> {view === "history" ? "वापस" : "पुराने पेपर"}
+          </button>
         </div>
 
+        {view === "history" ? (
+          <HistoryView
+            historyList={historyList}
+            historyLoading={historyLoading}
+            historyError={historyError}
+            selectedHistory={selectedHistory}
+            setSelectedHistory={setSelectedHistory}
+            printRefCb={printRefCb}
+            onPrint={handlePrint}
+            onDownloadWord={handleDownloadWord}
+          />
+        ) : (
+        <>
         <div className="flex items-center gap-2 mb-8">
           {STEPS.map((s, i) => (
             <div key={s} className="flex items-center gap-2 flex-1">
@@ -300,6 +410,19 @@ export default function ExamPaperGenerator() {
                   </select>
                 </label>
                 <Field label="तिथि" value={header.date} onChange={(v) => setHeader((h) => ({ ...h, date: v }))} />
+                <label className="block text-xs text-slate-500">
+                  बोर्ड (Board)
+                  <select
+                    value={header.board}
+                    onChange={(e) => setHeader((h) => ({ ...h, board: e.target.value }))}
+                    className="mt-1 w-full border border-stone-300 rounded px-3 py-2 text-sm text-slate-800"
+                  >
+                    <option>CBSE (NCERT)</option>
+                    <option>RBSE (Rajasthan Board)</option>
+                    <option>अन्य State Board</option>
+                    <option>ICSE</option>
+                  </select>
+                </label>
               </div>
             </div>
 
@@ -346,12 +469,31 @@ export default function ExamPaperGenerator() {
                   ? "बस चैप्टर चुनो — AI खुद मार्क्स बैलेंस कर देगा"
                   : `हर चैप्टर के लिए marks खुद तय करो (लक्ष्य: कुल ${totalMarks} अंक)`}
               </p>
+
+              <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3 mb-3">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-xs font-semibold text-emerald-900">NCERT से चैप्टर अपने आप भरें (Class 6-10 Maths)</span>
+                  <select
+                    value={header.medium}
+                    onChange={(e) => setHeader((h) => ({ ...h, medium: e.target.value }))}
+                    className="text-xs border border-emerald-300 rounded px-2 py-1"
+                  >
+                    <option value="English">English medium</option>
+                    <option value="Hindi">Hindi medium</option>
+                  </select>
+                </div>
+                <button onClick={autoLoadChapters} className="w-full bg-emerald-700 text-white text-xs rounded-md py-2">
+                  Class {header.className || "?"} — {header.subject || "?"} के चैप्टर लोड करो
+                </button>
+                {chapterLoadMsg && <p className="text-xs text-amber-700 mt-2">{chapterLoadMsg}</p>}
+              </div>
+
               <div className="flex gap-2 mb-3">
                 <input
                   value={chapterInput}
                   onChange={(e) => setChapterInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && addChapter()}
-                  placeholder="अध्याय का नाम लिखें और Enter दबाएं"
+                  placeholder="या khud chapter ka naam likho aur Enter dabao"
                   className="flex-1 border border-stone-300 rounded px-3 py-2 text-sm"
                 />
                 <button onClick={addChapter} className="bg-slate-900 text-white rounded-md px-4 text-sm">जोड़ें</button>
@@ -421,7 +563,11 @@ export default function ExamPaperGenerator() {
             onBack={() => setStep(2)}
             onPrint={handlePrint}
             onDownloadWord={handleDownloadWord}
+            onSaveHistory={savePaperToHistory}
+            saveStatus={saveStatus}
           />
+        )}
+        </>
         )}
       </div>
     </div>
@@ -548,7 +694,7 @@ function QuestionEditor({ kind, q, idx, onChange, onRemove }) {
   );
 }
 
-function ReviewStep({ header, sections, questions, printRefCb, onBack, onPrint, onDownloadWord }) {
+function ReviewStep({ header, sections, questions, printRefCb, onBack, onPrint, onDownloadWord, onSaveHistory, saveStatus }) {
   let qNumber = 0;
   return (
     <div className="space-y-4">
@@ -619,6 +765,14 @@ function ReviewStep({ header, sections, questions, printRefCb, onBack, onPrint, 
           <ArrowLeft size={16} /> पीछे
         </button>
         <div className="flex gap-2">
+          <button
+            onClick={onSaveHistory}
+            disabled={saveStatus === "saving"}
+            className="flex items-center gap-1 text-sm border border-emerald-700 text-emerald-700 rounded-md px-4 py-2"
+          >
+            {saveStatus === "saving" ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+            {saveStatus === "saved" ? "सेव हो गया ✓" : "इतिहास में सेव करें"}
+          </button>
           <button onClick={onPrint} className="flex items-center gap-1 text-sm border border-slate-900 text-slate-900 rounded-md px-4 py-2">
             <Printer size={16} /> PDF / प्रिंट
           </button>
@@ -627,6 +781,84 @@ function ReviewStep({ header, sections, questions, printRefCb, onBack, onPrint, 
           </button>
         </div>
       </div>
+      {saveStatus === "error" && <p className="text-xs text-red-600 text-right">Save nahi ho paya, dobara try karo</p>}
+    </div>
+  );
+}
+
+function HistoryView({ historyList, historyLoading, historyError, selectedHistory, setSelectedHistory, printRefCb, onPrint, onDownloadWord }) {
+  if (selectedHistory) {
+    const h = selectedHistory;
+    let qNumber = 0;
+    return (
+      <div className="space-y-4">
+        <button onClick={() => setSelectedHistory(null)} className="flex items-center gap-1 text-sm text-slate-600 px-2 py-1">
+          <ArrowLeft size={16} /> लिस्ट पर वापस
+        </button>
+        <div ref={printRefCb} className="bg-white border border-stone-200 rounded-lg p-6 font-serif text-sm">
+          <div className="qp-header text-center border-b-2 border-slate-900 pb-3 mb-4">
+            <h2 className="text-lg font-bold">{h.header?.school || "विद्यालय का नाम"}</h2>
+            <h3 className="text-base">{h.header?.exam}</h3>
+            <div className="qp-meta flex justify-between text-xs mt-2">
+              <span>कक्षा: {h.header?.className || "—"}</span>
+              <span>विषय: {h.header?.subject || "—"}</span>
+            </div>
+          </div>
+          {(h.sections || []).map((s) => {
+            const list = (h.questions || {})[s.id] || [];
+            return (
+              <div key={s.id} className="mb-4">
+                <div className="qp-section-title font-semibold border-b border-dashed border-stone-400 pb-1 mb-2">
+                  {KIND_LABELS[s.kind]} ({s.marks} अंक प्रत्येक)
+                </div>
+                {s.kind === "match" && list.map((q, i) => (
+                  <table key={i} className="qp-pair-row ml-4 mb-2"><tbody>
+                    {q.pairs.map((p, pi) => (<tr key={pi}><td>{pi + 1}. {p.left}</td><td>{pi + 1}. {p.right}</td></tr>))}
+                  </tbody></table>
+                ))}
+                {s.kind === "mcq" && list.map((q, i) => { qNumber++; return (
+                  <div key={i} className="qp-q">{qNumber}. {q.text}
+                    <div className="qp-opts grid grid-cols-2 ml-5 text-xs">{q.options.map((o, oi) => (<span key={oi}>({String.fromCharCode(97 + oi)}) {o}</span>))}</div>
+                  </div>
+                );})}
+                {s.kind === "essay" && list.map((q, i) => { qNumber++; return (
+                  <div key={i} className="qp-q">{qNumber}. {q.text}{q.orText && <div className="ml-5 text-xs mt-1">अथवा<br />{q.orText}</div>}</div>
+                );})}
+                {["fill", "veryshort", "short"].includes(s.kind) && list.map((q, i) => { qNumber++; return <div key={i} className="qp-q">{qNumber}. {q.text}</div>; })}
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button onClick={onPrint} className="flex items-center gap-1 text-sm border border-slate-900 text-slate-900 rounded-md px-4 py-2">
+            <Printer size={16} /> PDF / प्रिंट
+          </button>
+          <button onClick={onDownloadWord} className="flex items-center gap-1 text-sm bg-slate-900 text-white rounded-md px-4 py-2">
+            <Download size={16} /> Word डाउनलोड
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <h2 className="font-serif font-semibold text-slate-800">पुराने पेपर</h2>
+      {historyLoading && <p className="text-sm text-slate-500">लोड हो रहा है...</p>}
+      {historyError && <p className="text-sm text-red-600">{historyError}</p>}
+      {!historyLoading && !historyError && historyList.length === 0 && (
+        <p className="text-sm text-slate-400">अभी तक कोई पेपर सेव नहीं हुआ</p>
+      )}
+      {historyList.map((h) => (
+        <button
+          key={h.id}
+          onClick={() => setSelectedHistory(h)}
+          className="w-full text-left bg-white border border-stone-200 rounded-lg p-4 hover:border-slate-400"
+        >
+          <div className="font-semibold text-sm">{h.subject} — कक्षा {h.class_name}</div>
+          <div className="text-xs text-slate-500 mt-1">{h.exam} · {h.board} · {new Date(h.created_at).toLocaleDateString("hi-IN")}</div>
+        </button>
+      ))}
     </div>
   );
 }
