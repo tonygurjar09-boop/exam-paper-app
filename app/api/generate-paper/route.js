@@ -9,7 +9,7 @@ const KIND_NAMES = {
   essay: "निबंधात्मक (लंबा उत्तर, अथवा विकल्प सहित)",
 };
 
-function buildPrompt({ className, subject, chapters, sections, chapterMarks, difficulty }) {
+function buildPrompt({ className, subject, chapters, sections, chapterMarks, difficulty, board }) {
   const sectionLines = sections
     .map((s) => `- kind: "${s.kind}" (${KIND_NAMES[s.kind] || s.kind}) — बिल्कुल ${s.count} प्रश्न चाहिए, हर एक ${s.marks} अंक का`)
     .join("\n");
@@ -27,7 +27,7 @@ function buildPrompt({ className, subject, chapters, sections, chapterMarks, dif
       ? "सभी प्रश्न कठिन स्तर के होने चाहिए — गहरी समझ और application वाले सवाल, टॉप स्टूडेंट्स के लिए चुनौतीपूर्ण।"
       : "प्रश्नों में आसान, मध्यम और कठिन — तीनों स्तर का मिश्रण होना चाहिए, ताकि हर तरह के स्टूडेंट के लिए कुछ हो।";
 
-  return `तुम एक अनुभवी स्कूल शिक्षक हो। कक्षा ${className} के विषय "${subject}" के लिए परीक्षा के प्रश्न बनाओ:
+  return `तुम एक अनुभवी स्कूल शिक्षक हो। ${board || "CBSE (NCERT)"} बोर्ड के पाठ्यक्रम के अनुसार, कक्षा ${className} के विषय "${subject}" के लिए परीक्षा के प्रश्न बनाओ:
 
 ${chapterLine}
 
@@ -51,7 +51,7 @@ har section ke kind ke hisab se exact count match hona chahiye jo upar bataya ga
 
 export async function POST(req) {
   try {
-    const { className, subject, chapters, chapterMarks, sections, difficulty } = await req.json();
+    const { className, subject, chapters, chapterMarks, sections, difficulty, board } = await req.json();
     if (!className || !subject || !chapters?.length || !sections?.length) {
       return NextResponse.json({ error: "कक्षा, विषय, अध्याय और संरचना — सब ज़रूरी हैं" }, { status: 400 });
     }
@@ -64,7 +64,7 @@ export async function POST(req) {
       );
     }
 
-    const prompt = buildPrompt({ className, subject, chapters, sections, chapterMarks, difficulty });
+    const prompt = buildPrompt({ className, subject, chapters, sections, chapterMarks, difficulty, board });
 
     const resp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
